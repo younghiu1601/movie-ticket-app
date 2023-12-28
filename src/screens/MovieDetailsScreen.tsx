@@ -1,4 +1,4 @@
-import React, {useEffect, useState} from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   Text,
   View,
@@ -10,8 +10,13 @@ import {
   Image,
   FlatList,
   TouchableOpacity,
+  Modal,
+  Alert,
+  TouchableWithoutFeedback,
+  Keyboard,
+  Dimensions,
 } from 'react-native';
-import {baseImagePath, movieCastDetails, movieDetails} from '../api/apicalls';
+import { baseImagePath, movieCastDetails, movieDetails, movieTrailer } from '../api/apicalls';
 import {
   BORDERRADIUS,
   COLORS,
@@ -24,6 +29,8 @@ import LinearGradient from 'react-native-linear-gradient';
 import CustomIcon from '../components/CustomIcon';
 import CategoryHeader from '../components/CategoryHeader';
 import CastCard from '../components/CastCard';
+import AntDesign from 'react-native-vector-icons/AntDesign';
+import YoutubePlayer from 'react-native-youtube-iframe';
 
 const getMovieDetails = async (movieid: number) => {
   try {
@@ -48,9 +55,23 @@ const getMovieCastDetails = async (movieid: number) => {
   }
 };
 
-const MovieDetailsScreen = ({navigation, route}: any) => {
+const getMovieTrailer = async (movieid: number) => {
+  try {
+    let response = await fetch(movieTrailer(movieid));
+    let json = await response.json();
+    return json;
+  } catch (error) {
+    console.error('Something Went wrong in getMoviesTrailer Function', error);
+  }
+};
+
+const MovieDetailsScreen = ({ navigation, route }: any) => {
   const [movieData, setMovieData] = useState<any>(undefined);
   const [movieCastData, setmovieCastData] = useState<any>(undefined);
+  const [movieTrailer, setMovieTrailer] = useState<any>(undefined);
+  const [modalTrailer, setModalTrailer] = useState<any>(false);
+  const [playing, setPlaying] = useState(false);
+  const { width } = Dimensions.get('window');
 
   useEffect(() => {
     (async () => {
@@ -62,13 +83,31 @@ const MovieDetailsScreen = ({navigation, route}: any) => {
       const tempMovieCastData = await getMovieCastDetails(route.params.movieid);
       setmovieCastData(tempMovieCastData.cast);
     })();
+
+    (async () => {
+      const tempMovieTrailer = await getMovieTrailer(route.params.movieid);
+      setMovieTrailer(tempMovieTrailer.results[0]);
+    })();
+  }, []);
+
+  const onStateChange = useCallback((state: any) => {
+    if (state === "ended") {
+      setPlaying(false);
+      Alert.alert("video has finished playing!");
+    }
+  }, []);
+
+  const togglePlaying = useCallback(() => {
+    setPlaying((prev) => !prev);
   }, []);
 
   if (
     movieData == undefined &&
     movieData == null &&
     movieCastData == undefined &&
-    movieCastData == null
+    movieCastData == null &&
+    movieTrailer == undefined &&
+    movieTrailer == null
   ) {
     return (
       <ScrollView
@@ -89,99 +128,118 @@ const MovieDetailsScreen = ({navigation, route}: any) => {
       </ScrollView>
     );
   }
-  return (
-    <ScrollView
-      style={styles.container}
-      bounces={false}
-      showsVerticalScrollIndicator={false}>
-      <StatusBar hidden />
-
-      <View>
-        <ImageBackground
-          source={{
-            uri: baseImagePath('w780', movieData?.backdrop_path),
-          }}
-          style={styles.imageBG}>
-          <LinearGradient
-            colors={[COLORS.BlackRGB10, COLORS.Grey]}
-            style={styles.linearGradient}>
-            <View style={styles.appHeaderContainer}>
-              <AppHeader
-                name="close"
-                header={''}
-                action={() => navigation.goBack()}
-              />
-            </View>
-          </LinearGradient>
-        </ImageBackground>
-        <View style={styles.imageBG}></View>
-        <Image
-          source={{uri: baseImagePath('w342', movieData?.poster_path)}}
-          style={styles.cardImage}
-        />
-      </View>
-
-      <View style={styles.timeContainer}>
-        <CustomIcon name="clock" style={styles.clockIcon} />
-        <Text style={styles.runtimeText}>
-          {Math.floor(movieData?.runtime / 60)}h{' '}
-          {Math.floor(movieData?.runtime % 60)}m
-        </Text>
-      </View>
-
-      <View>
-        <Text style={styles.title}>{movieData?.title}</Text>
-        <View style={styles.genreContainer}>
-          {movieData?.genres.map((item: any) => {
-            return (
-              <View style={styles.genreBox} key={item.id}>
-                <Text style={styles.genreText}>{item.name}</Text>
-              </View>
-            );
-          })}
-        </View>
-        <Text style={styles.tagline}>{movieData?.tagline}</Text>
-      </View>
-
-      <View style={styles.infoContainer}>
-        <View style={styles.rateContainer}>
-          <CustomIcon name="star" style={styles.starIcon} />
-          <Text style={styles.runtimeText}>
-            {movieData?.vote_average.toFixed(1)} ({movieData?.vote_count})
-          </Text>
-          <Text style={styles.runtimeText}>
-            {movieData?.release_date.substring(8, 10)}{' '}
-            {new Date(movieData?.release_date).toLocaleString('default', {
-              month: 'long',
-            })}{' '}
-            {movieData?.release_date.substring(0, 4)}
-          </Text>
-        </View>
-        <Text style={styles.descriptionText}>{movieData?.overview}</Text>
-      </View>
-
-      <View>
-        <CategoryHeader title="Diễn viên" />
-        <FlatList
-          data={movieCastData}
-          keyExtractor={(item: any) => item.id}
-          horizontal
-          contentContainerStyle={styles.containerGap24}
-          showsHorizontalScrollIndicator={false}
-          renderItem={({item, index}) => (
-            <CastCard
-              shouldMarginatedAtEnd={true}
-              cardWidth={80}
-              isFirst={index == 0 ? true : false}
-              isLast={index == movieCastData?.length - 1 ? true : false}
-              imagePath={baseImagePath('w185', item.profile_path)}
-              title={item.original_name}
-              subtitle={item.character}
-            />
-          )}
-        />
+  else
+    return (
+      <ScrollView
+        style={styles.container}
+        bounces={false}
+        showsVerticalScrollIndicator={false}>
+        <StatusBar hidden />
 
         <View>
+          <Modal
+          animationType="slide"
+          transparent={true}
+          visible={modalTrailer}
+          onRequestClose={() => {
+            setModalTrailer(!modalTrailer);
+          }}>
+          <TouchableWithoutFeedback onPress={() => Keyboard.dismiss()}>
+            <View style={styles.centeredView}>
+              <View style={styles.modalView}>
+                <View style={{ flexDirection: 'row', gap: 20, paddingTop: 10, justifyContent: 'flex-end' }}>
+                  <TouchableOpacity
+                    style={styles.button}
+                    onPress={() => setModalTrailer(!modalTrailer)}>
+                    <AntDesign name="closecircle" size={24} color={COLORS.Green} />
+                  </TouchableOpacity>
+                </View>
+                <View>
+                  <YoutubePlayer
+                    width={width - 40}
+                    height={width / 1.8}
+                    play={playing}
+                    videoId={movieTrailer?.key}
+                    onChangeState={onStateChange}
+                  />
+                </View>
+              </View>
+            </View>
+          </TouchableWithoutFeedback>
+        </Modal>
+          <ImageBackground
+            source={{
+              uri: baseImagePath('w780', movieData?.backdrop_path),
+            }}
+            style={styles.imageBG}>
+            <LinearGradient
+              colors={[COLORS.BlackRGB10, COLORS.Grey]}
+              style={styles.linearGradient}>
+              <View style={styles.appHeaderContainer}>
+                <AppHeader
+                  name="close"
+                  header={''}
+                  action={() => navigation.goBack()}
+                />
+              </View>
+            </LinearGradient>
+          </ImageBackground>
+          <View style={styles.imageBG}></View>
+          <Image
+            source={{ uri: baseImagePath('w342', movieData?.poster_path) }}
+            style={styles.cardImage}
+          />
+        </View>
+
+        <View style={styles.timeContainer}>
+          <CustomIcon name="clock" style={styles.clockIcon} />
+          <Text style={styles.runtimeText}>
+            {Math.floor(movieData?.runtime / 60)}h{' '}
+            {Math.floor(movieData?.runtime % 60)}m
+          </Text>
+        </View>
+
+        <View>
+          <Text style={styles.title}>{movieData?.title}</Text>
+          <View style={styles.genreContainer}>
+            {movieData?.genres.map((item: any) => {
+              return (
+                <View style={styles.genreBox} key={item.id}>
+                  <Text style={styles.genreText}>{item.name}</Text>
+                </View>
+              );
+            })}
+          </View>
+          <Text style={styles.tagline}>{movieData?.tagline}</Text>
+        </View>
+
+        <View style={styles.infoContainer}>
+          <View style={styles.rateContainer}>
+            <CustomIcon name="star" style={styles.starIcon} />
+            <Text style={styles.runtimeText}>
+              {movieData?.vote_average.toFixed(1)} ({movieData?.vote_count})
+            </Text>
+            <Text style={styles.runtimeText}>
+              {movieData?.release_date.substring(8, 10)}{' '}
+              {new Date(movieData?.release_date).toLocaleString('default', {
+                month: 'long',
+              })}{' '}
+              {movieData?.release_date.substring(0, 4)}
+            </Text>
+          </View>
+          <Text style={styles.descriptionText}>{movieData?.overview}</Text>
+        </View>
+        <View style={styles.groupBtn}>
+          <TouchableOpacity
+            style={[styles.buttonBG, { backgroundColor: COLORS.Orange }]}
+            onPress={() => {
+              setModalTrailer(!modalTrailer);
+              togglePlaying;
+            }}>
+            <Text style={styles.buttonText}>Xem trailer</Text>
+            <AntDesign name="playcircleo" size={20} color={COLORS.White} />
+          </TouchableOpacity>
+
           <TouchableOpacity
             style={styles.buttonBG}
             onPress={() => {
@@ -191,11 +249,34 @@ const MovieDetailsScreen = ({navigation, route}: any) => {
               });
             }}>
             <Text style={styles.buttonText}>Chọn ghế</Text>
+            <CustomIcon name='ticket' size={20} color={COLORS.White} />
           </TouchableOpacity>
         </View>
-      </View>
-    </ScrollView>
-  );
+
+        <View>
+          <CategoryHeader title="Diễn viên" />
+          <FlatList
+            data={movieCastData}
+            keyExtractor={(item: any) => item.id}
+            horizontal
+            contentContainerStyle={styles.containerGap24}
+            showsHorizontalScrollIndicator={false}
+            renderItem={({ item, index }) => (
+              <CastCard
+                shouldMarginatedAtEnd={true}
+                cardWidth={80}
+                isFirst={index == 0 ? true : false}
+                isLast={index == movieCastData?.length - 1 ? true : false}
+                imagePath={baseImagePath('w185', item.profile_path)}
+                title={item.original_name}
+                subtitle={item.character}
+              />
+            )}
+          />
+
+        </View>
+      </ScrollView>
+    );
 };
 
 const styles = StyleSheet.create({
@@ -303,18 +384,50 @@ const styles = StyleSheet.create({
   containerGap24: {
     gap: SPACING.space_24,
   },
+  groupBtn: {
+    flexDirection: 'row',
+    justifyContent: 'space-evenly',
+    alignItems: 'center',
+  },
   buttonBG: {
     alignItems: 'center',
     marginVertical: SPACING.space_24,
-  },
-  buttonText: {
-    borderRadius: BORDERRADIUS.radius_25 * 2,
+    flexDirection: 'row',
+    borderRadius: BORDERRADIUS.radius_10,
     paddingHorizontal: SPACING.space_24,
     paddingVertical: SPACING.space_10,
     backgroundColor: COLORS.Green,
+  },
+  buttonText: {
     fontFamily: FONTFAMILY.poppins_medium,
     fontSize: FONTSIZE.size_14,
     color: COLORS.White,
+    marginRight: SPACING.space_10,
+  },
+  centeredView: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 160,
+    marginHorizontal: 20,
+  },
+  modalView: {
+    backgroundColor: 'white',
+    borderRadius: 20,
+    padding: 10,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    margin: 20,
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  button: {
+    borderRadius: 50,
+    marginBottom: 12,
   },
 });
 
